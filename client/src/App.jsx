@@ -9,8 +9,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 
-// Import the Map Component we created earlier
+// --- FIXED IMPORT PATH ---
+// Corrected to find HospitalMap inside the components folder
 import HospitalMap from './components/HospitalMap';
+
+// --- PRODUCTION BACKEND URL ---
+// Replaced localhost with your live Render link to fix connection errors
+const API_BASE_URL = "https://ruraldoc-ai.onrender.com"; 
 
 const App = () => {
   // --- 1. STATES ---
@@ -49,13 +54,14 @@ const App = () => {
     setSearchTerm("");
   };
 
-  // --- 3. API CALLS ---
+  // --- 3. API CALLS (UPDATED FOR PRODUCTION) ---
   const handleAuth = async (e) => {
     e.preventDefault();
     setAuthLoading(true);
     try {
       const endpoint = isRegistering ? 'register' : 'login';
-      const res = await axios.post(`http://localhost:5000/api/auth/${endpoint}`, authData);
+      // Now connects to Render instead of localhost
+      const res = await axios.post(`${API_BASE_URL}/api/auth/${endpoint}`, authData);
       if (!isRegistering) {
         localStorage.setItem('token', res.data.token);
         localStorage.setItem('user', JSON.stringify(res.data.user));
@@ -64,8 +70,9 @@ const App = () => {
         alert("Account created! Please login.");
         setIsRegistering(false);
       }
-    } catch (err) { alert(err.response?.data?.message || "Auth Error"); }
-    finally { setAuthLoading(false); }
+    } catch (err) { 
+      alert(err.response?.data?.message || "Auth Error: Could not connect to the server."); 
+    } finally { setAuthLoading(false); }
   };
 
   const fetchHistory = async () => {
@@ -75,7 +82,7 @@ const App = () => {
       const user = JSON.parse(userStr);
       const userId = user.id || user._id; 
       
-      const res = await axios.get(`http://localhost:5000/api/auth/user/${userId}`);
+      const res = await axios.get(`${API_BASE_URL}/api/auth/user/${userId}`);
       setHistory(Array.isArray(res.data.history) ? res.data.history.reverse() : []);
     } catch (err) { console.error("History fetch failed."); }
   };
@@ -88,7 +95,7 @@ const App = () => {
     setPrediction(""); 
     try {
       const user = JSON.parse(localStorage.getItem('user'));
-      const res = await axios.post('http://localhost:5000/api/ai/diagnose', { 
+      const res = await axios.post(`${API_BASE_URL}/api/ai/diagnose`, { 
         symptoms: selectedSymptoms,
         userId: user?.id || user?._id,
         age: patientInfo.age,
@@ -96,7 +103,7 @@ const App = () => {
       });
       setPrediction(res.data.prediction);
     } catch (err) { 
-        alert("AI Engine Offline. Ensure backend is running on port 5000."); 
+        alert("AI Engine Offline. Please try again later."); 
     } finally { setLoading(false); }
   };
 
@@ -140,45 +147,44 @@ const App = () => {
 
   // --- 4. RENDER ---
   if (!isLoggedIn) {
-    // ... (Login/Register view remains same as your provided code)
     return (
-        <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 font-sans">
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-md bg-white rounded-[2.5rem] p-10 shadow-2xl">
-            <div className="text-center mb-8">
-              <div className="bg-emerald-500 w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-emerald-200">
-                <Activity className="text-white w-7 h-7" />
-              </div>
-              <h1 className="text-3xl font-black text-slate-800 tracking-tight">RuralDoc AI</h1>
-              <p className="text-slate-400 mt-2 font-medium italic">{isRegistering ? "Registration" : "Clinician Login"}</p>
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 font-sans">
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-md bg-white rounded-[2.5rem] p-10 shadow-2xl">
+          <div className="text-center mb-8">
+            <div className="bg-emerald-500 w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-emerald-200">
+              <Activity className="text-white w-7 h-7" />
             </div>
-            <form onSubmit={handleAuth} className="space-y-4">
-              {isRegistering && (
-                <div className="relative">
-                  <UserIcon className="absolute left-4 top-4 w-5 h-5 text-slate-300" />
-                  <input required type="text" placeholder="Full Name" className="w-full pl-12 pr-4 py-4 bg-slate-50 border-none rounded-2xl outline-none" 
-                    onChange={(e) => setAuthData({...authData, name: e.target.value})} />
-                </div>
-              )}
+            <h1 className="text-3xl font-black text-slate-800 tracking-tight">RuralDoc AI</h1>
+            <p className="text-slate-400 mt-2 font-medium italic">{isRegistering ? "Registration" : "Clinician Login"}</p>
+          </div>
+          <form onSubmit={handleAuth} className="space-y-4">
+            {isRegistering && (
               <div className="relative">
-                <Mail className="absolute left-4 top-4 w-5 h-5 text-slate-300" />
-                <input required type="email" placeholder="Email" className="w-full pl-12 pr-4 py-4 bg-slate-50 border-none rounded-2xl outline-none" 
-                  onChange={(e) => setAuthData({...authData, email: e.target.value})} />
+                <UserIcon className="absolute left-4 top-4 w-5 h-5 text-slate-300" />
+                <input required type="text" placeholder="Full Name" className="w-full pl-12 pr-4 py-4 bg-slate-50 border-none rounded-2xl outline-none" 
+                  onChange={(e) => setAuthData({...authData, name: e.target.value})} />
               </div>
-              <div className="relative">
-                <Lock className="absolute left-4 top-4 w-5 h-5 text-slate-300" />
-                <input required type="password" placeholder="Password" className="w-full pl-12 pr-4 py-4 bg-slate-50 border-none rounded-2xl outline-none" 
-                  onChange={(e) => setAuthData({...authData, password: e.target.value})} />
-              </div>
-              <button type="submit" disabled={authLoading} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-bold hover:bg-emerald-600 transition-all">
-                {authLoading ? <Loader2 className="animate-spin mx-auto" /> : (isRegistering ? "Register" : "Sign In")}
-              </button>
-            </form>
-            <button onClick={() => setIsRegistering(!isRegistering)} className="w-full mt-4 text-sm text-emerald-600 font-bold underline">
-              {isRegistering ? "Back to Login" : "Create New Account"}
+            )}
+            <div className="relative">
+              <Mail className="absolute left-4 top-4 w-5 h-5 text-slate-300" />
+              <input required type="email" placeholder="Email" className="w-full pl-12 pr-4 py-4 bg-slate-50 border-none rounded-2xl outline-none" 
+                onChange={(e) => setAuthData({...authData, email: e.target.value})} />
+            </div>
+            <div className="relative">
+              <Lock className="absolute left-4 top-4 w-5 h-5 text-slate-300" />
+              <input required type="password" placeholder="Password" className="w-full pl-12 pr-4 py-4 bg-slate-50 border-none rounded-2xl outline-none" 
+                onChange={(e) => setAuthData({...authData, password: e.target.value})} />
+            </div>
+            <button type="submit" disabled={authLoading} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-bold hover:bg-emerald-600 transition-all">
+              {authLoading ? <Loader2 className="animate-spin mx-auto" /> : (isRegistering ? "Register" : "Sign In")}
             </button>
-          </motion.div>
-        </div>
-      );
+          </form>
+          <button onClick={() => setIsRegistering(!isRegistering)} className="w-full mt-4 text-sm text-emerald-600 font-bold underline">
+            {isRegistering ? "Back to Login" : "Create New Account"}
+          </button>
+        </motion.div>
+      </div>
+    );
   }
 
   return (
@@ -218,7 +224,6 @@ const App = () => {
 
           <div className="grid lg:grid-cols-12 gap-8">
             <div className="lg:col-span-8 space-y-6">
-              {/* Diagnosis Inputs */}
               <div className="bg-white p-8 rounded-[2.5rem] shadow-sm grid md:grid-cols-2 gap-6">
                 <div>
                   <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block tracking-widest">Patient Age</label>
@@ -234,7 +239,6 @@ const App = () => {
                 </div>
               </div>
 
-              {/* Symptom Selection */}
               <div className="bg-white p-8 rounded-[2.5rem] shadow-sm relative">
                 <label className="text-[10px] font-black text-slate-400 uppercase mb-4 block tracking-widest">Search or Type Symptoms</label>
                 <div className="relative mb-6">
@@ -281,7 +285,6 @@ const App = () => {
                 </button>
               </div>
 
-              {/* NEW MAP SECTION */}
               <div className="bg-white p-8 rounded-[2.5rem] shadow-sm">
                 <div className="flex items-center gap-3 mb-6">
                    <div className="bg-emerald-100 p-2 rounded-xl">
@@ -289,11 +292,11 @@ const App = () => {
                    </div>
                    <h3 className="font-black text-slate-800 uppercase tracking-widest text-xs">Nearby Government Hospitals</h3>
                 </div>
+                {/* Fixed Map Component Placement */}
                 <HospitalMap />
               </div>
             </div>
 
-            {/* AI Results Display */}
             <div className="lg:col-span-4 bg-slate-900 rounded-[3.5rem] p-10 text-white shadow-2xl text-center flex flex-col justify-center relative min-h-[500px]">
               <AnimatePresence mode="wait">
                 {prediction ? (
