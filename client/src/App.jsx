@@ -105,7 +105,7 @@ const App = () => {
     } finally { setLoading(false); }
   };
 
-  // --- PDF GENERATION (FIXED) ---
+  // --- PDF GENERATION (FAIL-SAFE VERSION) ---
   const generatePDF = () => {
     try {
       const doc = new jsPDF();
@@ -122,25 +122,29 @@ const App = () => {
       doc.setTextColor(40, 40, 40);
       doc.setFontSize(11);
       doc.text(`Patient: ${user.name}`, 20, 50);
-      doc.text(`Age: ${patientInfo.age}`, 20, 57);
+      doc.text(`Age: ${patientInfo.age || (history[0]?.age) || "N/A"}`, 20, 57);
       doc.text(`Date: ${new Date().toLocaleDateString()}`, 20, 64);
 
-      // Table Content - Using latest prediction and symptoms
+      // Table Content
       if (typeof doc.autoTable === 'function') {
         doc.autoTable({
           startY: 75,
           head: [['Category', 'Details']],
           body: [
-            ['Predicted Condition', prediction.toUpperCase()],
-            ['Reported Symptoms', selectedSymptoms.join(', ').replace(/_/g, ' ')],
-            ['Duration of Illness', patientInfo.duration],
+            // Use current prediction state, fallback to latest database record if state is lost
+            ['Predicted Condition', (prediction || (history[0]?.prediction) || "Pending Analysis").toUpperCase()],
+            ['Reported Symptoms', (selectedSymptoms.length > 0 ? selectedSymptoms : (history[0]?.symptoms || [])).join(', ').replace(/_/g, ' ')],
+            ['Duration of Illness', patientInfo.duration || (history[0]?.duration) || "N/A"],
           ],
           headStyles: { fillColor: [30, 41, 59] },
           theme: 'striped'
         });
       }
       doc.save(`RuralDoc_Report_${user.name}.pdf`);
-    } catch (error) { alert("Failed to create PDF."); }
+    } catch (error) { 
+        console.error(error);
+        alert("Failed to create PDF."); 
+    }
   };
 
   const handleLogout = () => {
@@ -204,10 +208,10 @@ const App = () => {
           {showHistory && (history.length > 0 ? history.map((item, i) => (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} key={i} className="p-4 rounded-2xl bg-white border border-slate-100 shadow-sm text-xs">
               <div className="flex justify-between font-bold text-emerald-600 mb-1">
-                <span className="capitalize">{item.prediction}</span>
+                <span className="capitalize">{item.prediction || "Unknown"}</span>
                 <span className="text-slate-400 font-normal">{new Date(item.date).toLocaleDateString()}</span>
               </div>
-              <p className="text-slate-500 truncate">{item.symptoms.join(', ').replace(/_/g, ' ')}</p>
+              <p className="text-slate-500 truncate">{(item.symptoms || []).join(', ').replace(/_/g, ' ')}</p>
             </motion.div>
           )) : <div className="text-center py-10 opacity-20 text-[10px] font-bold">NO RECORDS</div>)}
         </div>
@@ -293,7 +297,6 @@ const App = () => {
                    </div>
                    <h3 className="font-black text-slate-800 uppercase tracking-widest text-xs">Nearby Facilities</h3>
                 </div>
-                {/* Passed prediction as key to force map refresh on new diagnosis */}
                 <HospitalMap key={prediction} />
               </div>
             </div>
