@@ -3,11 +3,9 @@ import axios from 'axios';
 import { 
   Activity, ShieldCheck, Stethoscope, Mail, Lock, User as UserIcon, 
   LogOut, Loader2, Search, Plus, X, History, 
-  ChevronRight, Download, Keyboard, MapPin
+  ChevronRight, Keyboard, MapPin
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import jsPDF from 'jspdf';
-import 'jspdf-autotable';
 
 // --- COMPONENTS ---
 import HospitalMap from './components/HospitalMap';
@@ -100,60 +98,12 @@ const App = () => {
       
       if (res.data.prediction) {
         setPrediction(res.data.prediction);
-        // CRITICAL: Refresh history immediately so the PDF has a backup data source
         await fetchHistory();
       }
     } catch (err) { 
-        const msg = err.response?.status === 502 ? "AI Engine is waking up. Try again in 10 seconds." : "AI Engine Offline.";
+        const msg = err.response?.status === 502 ? "AI Engine is waking up. Try again." : "AI Engine Offline.";
         alert(msg); 
     } finally { setLoading(false); }
-  };
-
-  // --- PDF GENERATION (TRIPLE-CHECK VERSION) ---
-  const generatePDF = () => {
-    try {
-      const doc = new jsPDF();
-      const user = JSON.parse(localStorage.getItem('user')) || { name: 'Patient' };
-      
-      // Fallback Logic: State > History > Default
-      const finalPrediction = prediction || (history[0]?.prediction) || "Not Diagnosed";
-      const finalSymptoms = selectedSymptoms.length > 0 ? selectedSymptoms : (history[0]?.symptoms || []);
-      const finalAge = patientInfo.age || history[0]?.age || "N/A";
-      const finalDuration = patientInfo.duration || history[0]?.duration || "N/A";
-
-      // Header
-      doc.setFillColor(16, 185, 129); 
-      doc.rect(0, 0, 210, 40, 'F');
-      doc.setTextColor(255, 255, 255);
-      doc.setFontSize(22);
-      doc.text("RuralDoc AI Medical Report", 20, 25);
-
-      // Patient Info
-      doc.setTextColor(40, 40, 40);
-      doc.setFontSize(11);
-      doc.text(`Patient: ${user.name}`, 20, 50);
-      doc.text(`Age: ${finalAge}`, 20, 57);
-      doc.text(`Date: ${new Date().toLocaleDateString()}`, 20, 64);
-
-      // Table Content
-      if (typeof doc.autoTable === 'function') {
-        doc.autoTable({
-          startY: 75,
-          head: [['Category', 'Details']],
-          body: [
-            ['Predicted Condition', finalPrediction.toUpperCase()],
-            ['Reported Symptoms', finalSymptoms.join(', ').replace(/_/g, ' ')],
-            ['Duration of Illness', finalDuration],
-          ],
-          headStyles: { fillColor: [30, 41, 59] },
-          theme: 'striped'
-        });
-      }
-      doc.save(`RuralDoc_Report_${user.name}.pdf`);
-    } catch (error) { 
-        console.error("PDF Export Error:", error);
-        alert("Failed to create PDF. Ensure diagnosis is visible."); 
-    }
   };
 
   const handleLogout = () => {
@@ -240,7 +190,6 @@ const App = () => {
 
           <div className="grid lg:grid-cols-12 gap-8">
             <div className="lg:col-span-8 space-y-6">
-              {/* INPUTS */}
               <div className="bg-white p-8 rounded-[2.5rem] shadow-sm grid md:grid-cols-2 gap-6">
                 <div>
                   <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block">Patient Age</label>
@@ -256,7 +205,6 @@ const App = () => {
                 </div>
               </div>
 
-              {/* SYMPTOM SEARCH */}
               <div className="bg-white p-8 rounded-[2.5rem] shadow-sm">
                 <label className="text-[10px] font-black text-slate-400 uppercase mb-4 block">Select Symptoms</label>
                 <div className="relative mb-6">
@@ -298,7 +246,6 @@ const App = () => {
                 </button>
               </div>
 
-              {/* HOSPITAL MAP */}
               <div className="bg-white p-8 rounded-[2.5rem] shadow-sm">
                 <div className="flex items-center gap-3 mb-6">
                    <div className="bg-emerald-100 p-2 rounded-xl">
@@ -310,17 +257,13 @@ const App = () => {
               </div>
             </div>
 
-            {/* PREDICTION RESULT PANEL */}
             <div className="lg:col-span-4 bg-slate-900 rounded-[3.5rem] p-10 text-white shadow-2xl text-center flex flex-col justify-center min-h-[500px]">
               <AnimatePresence mode="wait">
                 {prediction ? (
                   <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}>
                     <ShieldCheck className="w-20 h-20 mb-6 text-emerald-500 mx-auto" />
                     <p className="text-slate-400 uppercase text-[10px] font-black mb-2 tracking-widest opacity-60">Result Found</p>
-                    <h3 className="text-4xl font-black mb-10 tracking-tight leading-tight capitalize">{prediction}</h3>
-                    <button onClick={generatePDF} className="flex items-center gap-2 bg-white/10 hover:bg-white text-white hover:text-slate-900 px-8 py-4 rounded-2xl text-sm font-bold transition-all mx-auto border border-white/10">
-                      <Download className="w-4 h-4" /> Export PDF
-                    </button>
+                    <h3 className="text-4xl font-black tracking-tight leading-tight capitalize">{prediction}</h3>
                   </motion.div>
                 ) : (
                   <div className="opacity-20 flex flex-col items-center">
