@@ -79,11 +79,11 @@ const App = () => {
       const user = JSON.parse(userStr);
       const userId = user.id || user._id; 
       const res = await axios.get(`${API_BASE_URL}/api/auth/user/${userId}`);
-      setHistory(Array.isArray(res.data.history) ? res.data.history.reverse() : []);
+      setHistory(Array.isArray(res.data.history) ? [...res.data.history].reverse() : []);
     } catch (err) { console.error("History fetch failed."); }
   };
 
-  useEffect(() => { if (isLoggedIn) fetchHistory(); }, [isLoggedIn, prediction]);
+  useEffect(() => { if (isLoggedIn) fetchHistory(); }, [isLoggedIn]);
 
   const handleDiagnose = async () => {
     if (!patientInfo.age || selectedSymptoms.length === 0) return alert("Please provide Age and Symptoms");
@@ -91,26 +91,36 @@ const App = () => {
     setPrediction(""); 
     try {
       const user = JSON.parse(localStorage.getItem('user'));
-      // Increased timeout to 30s for Render cold starts
       const res = await axios.post(`${API_BASE_URL}/api/ai/diagnose`, { 
         symptoms: selectedSymptoms,
         userId: user?.id || user?._id,
         age: patientInfo.age,
         duration: patientInfo.duration
       }, { timeout: 30000 });
-      setPrediction(res.data.prediction);
+      
+      if (res.data.prediction) {
+        setPrediction(res.data.prediction);
+        // CRITICAL: Refresh history immediately so the PDF has a backup data source
+        await fetchHistory();
+      }
     } catch (err) { 
         const msg = err.response?.status === 502 ? "AI Engine is waking up. Try again in 10 seconds." : "AI Engine Offline.";
         alert(msg); 
     } finally { setLoading(false); }
   };
 
-  // --- PDF GENERATION (FAIL-SAFE VERSION) ---
+  // --- PDF GENERATION (TRIPLE-CHECK VERSION) ---
   const generatePDF = () => {
     try {
       const doc = new jsPDF();
       const user = JSON.parse(localStorage.getItem('user')) || { name: 'Patient' };
       
+      // Fallback Logic: State > History > Default
+      const finalPrediction = prediction || (history[0]?.prediction) || "Not Diagnosed";
+      const finalSymptoms = selectedSymptoms.length > 0 ? selectedSymptoms : (history[0]?.symptoms || []);
+      const finalAge = patientInfo.age || history[0]?.age || "N/A";
+      const finalDuration = patientInfo.duration || history[0]?.duration || "N/A";
+
       // Header
       doc.setFillColor(16, 185, 129); 
       doc.rect(0, 0, 210, 40, 'F');
@@ -122,7 +132,7 @@ const App = () => {
       doc.setTextColor(40, 40, 40);
       doc.setFontSize(11);
       doc.text(`Patient: ${user.name}`, 20, 50);
-      doc.text(`Age: ${patientInfo.age || (history[0]?.age) || "N/A"}`, 20, 57);
+      doc.text(`Age: ${finalAge}`, 20, 57);
       doc.text(`Date: ${new Date().toLocaleDateString()}`, 20, 64);
 
       // Table Content
@@ -131,10 +141,9 @@ const App = () => {
           startY: 75,
           head: [['Category', 'Details']],
           body: [
-            // Use current prediction state, fallback to latest database record if state is lost
-            ['Predicted Condition', (prediction || (history[0]?.prediction) || "Pending Analysis").toUpperCase()],
-            ['Reported Symptoms', (selectedSymptoms.length > 0 ? selectedSymptoms : (history[0]?.symptoms || [])).join(', ').replace(/_/g, ' ')],
-            ['Duration of Illness', patientInfo.duration || (history[0]?.duration) || "N/A"],
+            ['Predicted Condition', finalPrediction.toUpperCase()],
+            ['Reported Symptoms', finalSymptoms.join(', ').replace(/_/g, ' ')],
+            ['Duration of Illness', finalDuration],
           ],
           headStyles: { fillColor: [30, 41, 59] },
           theme: 'striped'
@@ -142,8 +151,8 @@ const App = () => {
       }
       doc.save(`RuralDoc_Report_${user.name}.pdf`);
     } catch (error) { 
-        console.error(error);
-        alert("Failed to create PDF."); 
+        console.error("PDF Export Error:", error);
+        alert("Failed to create PDF. Ensure diagnosis is visible."); 
     }
   };
 
