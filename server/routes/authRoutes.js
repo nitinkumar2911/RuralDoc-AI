@@ -5,6 +5,7 @@ const router = express.Router();
 
 router.post('/register', register);
 router.post('/login', login);
+router.post('/send-otp', sendOTP);
 
 // --- ADD THIS LINE FOR HISTORY ---
 // This matches the frontend call: axios.get(`http://localhost:5000/api/auth/user/${userId}`)
