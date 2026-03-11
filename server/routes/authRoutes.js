@@ -1,5 +1,5 @@
 import express from 'express';
-import { register, login, getUserHistory } from '../controllers/authController.js'; // Added getUserHistory
+import { register, login, getUserHistory, sendOTP } from '../controllers/authController.js'; // Added getUserHistory
 
 const router = express.Router();
 
