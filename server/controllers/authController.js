@@ -3,15 +3,21 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import nodemailer from 'nodemailer';
 
-// Temporary in-memory storage for OTPs (For production, use Redis or a DB collection)
+// Temporary in-memory storage for OTPs
 const otpStore = new Map(); 
 
-// --- CONFIGURE EMAIL TRANSPORTER ---
+// --- CONFIGURE EMAIL TRANSPORTER (FIXED FOR RENDER) ---
 const transporter = nodemailer.createTransport({
-    service: 'gmail',
+    host: "smtp.gmail.com",
+    port: 465,
+    secure: true, // Use SSL
     auth: {
-        user: process.env.EMAIL_USER, // Your gmail
-        pass: process.env.EMAIL_PASS  // Your Gmail App Password
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS
+    },
+    // Force IPv4 and bypass local network restriction issues
+    tls: {
+        rejectUnauthorized: false
     }
 });
 
@@ -19,57 +25,69 @@ const transporter = nodemailer.createTransport({
 export const sendOTP = async (req, res) => {
     try {
         const { email } = req.body;
+        if (!email) return res.status(400).json({ message: "Email is required" });
+
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
         
         // Store OTP with 5-minute expiry
         otpStore.set(email, { otp, expires: Date.now() + 300000 });
 
+        console.log(`Attempting to send OTP to: ${email}`);
+
         await transporter.sendMail({
-            from: '"RuralDoc AI" <no-reply@ruraldoc.com>',
+            from: `"RuralDoc AI" <${process.env.EMAIL_USER}>`,
             to: email,
             subject: "Your Verification Code",
-            html: `<div style="font-family: Arial; padding: 20px; border: 1px solid #eee;">
-                    <h2>Verify Your Account</h2>
-                    <p>Your OTP code is: <b style="font-size: 24px; color: #10b981;">${otp}</b></p>
-                    <p>This code expires in 5 minutes.</p>
-                   </div>`
+            html: `
+                <div style="font-family: sans-serif; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
+                    <h2 style="color: #10b981;">RuralDoc AI Verification</h2>
+                    <p>Use the code below to complete your registration:</p>
+                    <div style="background: #f3f4f6; padding: 15px; text-align: center; border-radius: 8px;">
+                        <b style="font-size: 32px; letter-spacing: 5px; color: #1f2937;">${otp}</b>
+                    </div>
+                    <p style="color: #6b7280; font-size: 12px; margin-top: 20px;">This code expires in 5 minutes.</p>
+                </div>`
         });
 
         res.status(200).json({ message: "OTP sent successfully" });
     } catch (error) {
-        res.status(500).json({ message: "Error sending email: " + error.message });
+        console.error("Nodemailer Error:", error);
+        res.status(500).json({ message: "Failed to send email. Check server logs." });
     }
 };
 
-// --- UPDATED REGISTER (WITH OTP VERIFICATION) ---
+// --- REGISTER (WITH OTP VERIFICATION) ---
 export const register = async (req, res) => {
     try {
         const { name, email, password, otp } = req.body;
 
-        // Check if OTP exists and matches
         const storedData = otpStore.get(email);
+        
         if (!storedData || storedData.otp !== otp) {
-            return res.status(400).json({ message: "Invalid or expired OTP" });
+            return res.status(400).json({ message: "Invalid verification code" });
         }
+        
         if (Date.now() > storedData.expires) {
             otpStore.delete(email);
-            return res.status(400).json({ message: "OTP expired" });
+            return res.status(400).json({ message: "OTP has expired" });
         }
+
+        // Check if user already exists
+        const existingUser = await User.findOne({ email });
+        if (existingUser) return res.status(400).json({ message: "User already exists" });
 
         const hashedPassword = await bcrypt.hash(password, 12);
         const newUser = new User({ name, email, password: hashedPassword, history: [] });
         await newUser.save();
 
-        // Clear OTP after successful registration
         otpStore.delete(email);
-
         res.status(201).json({ message: "User registered successfully" });
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
 };
 
-// --- EXISTING LOGIN ---
+// --- LOGIN ---
 export const login = async (req, res) => {
     try {
         const { email, password } = req.body;
@@ -86,7 +104,7 @@ export const login = async (req, res) => {
     }
 };
 
-// --- EXISTING GET HISTORY ---
+// --- GET HISTORY ---
 export const getUserHistory = async (req, res) => {
     try {
         const { id } = req.params;
@@ -94,6 +112,6 @@ export const getUserHistory = async (req, res) => {
         if (!user) return res.status(404).json({ message: "User not found" });
         res.status(200).json({ history: user.history || [] });
     } catch (error) {
-        res.status(500).json({ message: "Error fetching history: " + error.message });
+        res.status(500).json({ message: "Error fetching history" });
     }
 };
