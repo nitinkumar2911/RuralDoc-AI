@@ -6,19 +6,20 @@ import nodemailer from 'nodemailer';
 // Temporary in-memory storage for OTPs
 const otpStore = new Map(); 
 
-// --- CONFIGURE EMAIL TRANSPORTER (FIXED FOR RENDER) ---
+// --- CONFIGURE EMAIL TRANSPORTER (FIXED FOR RENDER TIMEOUTS) ---
 const transporter = nodemailer.createTransport({
     host: "smtp.gmail.com",
-    port: 465,
-    secure: true, // Use SSL
+    port: 587,
+    secure: false, // Must be false for Port 587
     auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS
     },
-    // Force IPv4 and bypass local network restriction issues
     tls: {
-        rejectUnauthorized: false
-    }
+        rejectUnauthorized: false,
+        minVersion: "TLSv1.2"
+    },
+    connectionTimeout: 15000 // Give it 15 seconds to connect
 });
 
 // --- NEW: SEND OTP ---
@@ -32,7 +33,7 @@ export const sendOTP = async (req, res) => {
         // Store OTP with 5-minute expiry
         otpStore.set(email, { otp, expires: Date.now() + 300000 });
 
-        console.log(`Attempting to send OTP to: ${email}`);
+        console.log(`Attempting to send OTP to: ${email} using Port 587`);
 
         await transporter.sendMail({
             from: `"RuralDoc AI" <${process.env.EMAIL_USER}>`,
@@ -49,10 +50,11 @@ export const sendOTP = async (req, res) => {
                 </div>`
         });
 
+        console.log("✅ Email sent successfully to:", email);
         res.status(200).json({ message: "OTP sent successfully" });
     } catch (error) {
-        console.error("Nodemailer Error:", error);
-        res.status(500).json({ message: "Failed to send email. Check server logs." });
+        console.error("Nodemailer Error Details:", error);
+        res.status(500).json({ message: "Failed to send email: " + error.message });
     }
 };
 
@@ -72,7 +74,6 @@ export const register = async (req, res) => {
             return res.status(400).json({ message: "OTP has expired" });
         }
 
-        // Check if user already exists
         const existingUser = await User.findOne({ email });
         if (existingUser) return res.status(400).json({ message: "User already exists" });
 
