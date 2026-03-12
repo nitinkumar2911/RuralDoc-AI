@@ -3,7 +3,7 @@ import axios from 'axios';
 import { 
   Activity, ShieldCheck, Stethoscope, Mail, Lock, User as UserIcon, 
   LogOut, Loader2, Search, Plus, X, History, 
-  ChevronRight, Keyboard, MapPin, Fingerprint
+  ChevronRight, Keyboard, MapPin
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -13,15 +13,13 @@ import HospitalMap from './components/HospitalMap';
 // --- PRODUCTION CONFIG ---
 const API_BASE_URL = "https://ruraldoc-ai.onrender.com"; 
 
-// Configure Axios globally for this file
+// Configure Axios globally
 axios.defaults.withCredentials = true;
 
 const App = () => {
   // --- STATES ---
   const [isLoggedIn, setIsLoggedIn] = useState(!!localStorage.getItem('token'));
   const [isRegistering, setIsRegistering] = useState(false);
-  const [step, setStep] = useState('auth'); // 'auth' or 'otp'
-  const [otp, setOtp] = useState("");
   const [authData, setAuthData] = useState({ name: '', email: '', password: '' });
   const [authLoading, setAuthLoading] = useState(false);
 
@@ -57,37 +55,21 @@ const App = () => {
 
   // --- AUTH FLOW ---
 
-  // 1. Request OTP
-  const handleRequestOTP = async (e) => {
+  // 1. Direct Registration (OTP Removed)
+  const handleRegister = async (e) => {
     e.preventDefault();
     if (!authData.email.includes("@")) return alert("Please enter a valid email");
     setAuthLoading(true);
     try {
-      await axios.post(`${API_BASE_URL}/api/auth/send-otp`, { email: authData.email });
-      setStep('otp');
-      window.scrollTo(0,0);
+      await axios.post(`${API_BASE_URL}/api/auth/register`, authData);
+      alert("Registration successful! You can now log in.");
+      setIsRegistering(false); // Switch to Login view
     } catch (err) {
-      alert(err.response?.data?.message || "Server connection failed. Check if Render is awake.");
+      alert(err.response?.data?.message || "Registration failed.");
     } finally { setAuthLoading(false); }
   };
 
-  // 2. Verify & Register
-  const handleVerifyAndRegister = async (e) => {
-    e.preventDefault();
-    if (otp.length !== 6) return alert("Please enter the 6-digit code");
-    setAuthLoading(true);
-    try {
-      await axios.post(`${API_BASE_URL}/api/auth/register`, { ...authData, otp });
-      alert("Verification successful! You can now log in.");
-      setStep('auth');
-      setIsRegistering(false);
-      setOtp("");
-    } catch (err) {
-      alert(err.response?.data?.message || "Invalid or expired OTP");
-    } finally { setAuthLoading(false); }
-  };
-
-  // 3. Login
+  // 2. Login
   const handleLogin = async (e) => {
     e.preventDefault();
     setAuthLoading(true);
@@ -125,7 +107,7 @@ const App = () => {
         userId: user?.id || user?._id,
         age: patientInfo.age,
         duration: patientInfo.duration
-      }, { timeout: 45000 }); // Longer timeout for AI spin-up
+      }, { timeout: 45000 });
       
       if (res.data.prediction) {
         setPrediction(res.data.prediction);
@@ -141,7 +123,6 @@ const App = () => {
     localStorage.clear();
     setIsLoggedIn(false);
     setPrediction("");
-    setStep('auth');
   };
 
   if (!isLoggedIn) {
@@ -154,65 +135,44 @@ const App = () => {
             </div>
             <h1 className="text-3xl font-black text-slate-800">RuralDoc AI</h1>
             <p className="text-slate-400 mt-2 italic text-sm">
-               {step === 'otp' ? "Email Verification" : (isRegistering ? "Registration" : "Clinician Login")}
+               {isRegistering ? "Clinician Registration" : "Clinician Login"}
             </p>
           </div>
 
-          <AnimatePresence mode="wait">
-            {step === 'otp' ? (
-              <motion.form key="otp-screen" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }}
-                onSubmit={handleVerifyAndRegister} className="space-y-4">
-                <p className="text-xs text-center text-slate-500 mb-2 px-4 leading-relaxed">We sent a 6-digit code to <br/><span className="font-bold text-slate-800">{authData.email}</span></p>
-                <div className="relative">
-                  <Fingerprint className="absolute left-4 top-4 w-5 h-5 text-slate-300" />
-                  <input required type="text" placeholder="000000" className="w-full pl-12 pr-4 py-4 bg-slate-50 rounded-2xl outline-none font-bold text-center tracking-[0.5em] text-lg focus:ring-2 focus:ring-emerald-500 transition-all" 
-                    value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g,''))} maxLength={6} />
-                </div>
-                <button type="submit" className="w-full py-4 bg-emerald-500 text-white rounded-2xl font-bold hover:bg-emerald-600 transition-all shadow-lg">
-                  {authLoading ? <Loader2 className="animate-spin mx-auto" /> : "Verify & Register"}
-                </button>
-                <button type="button" onClick={() => setStep('auth')} className="w-full text-xs text-slate-400 hover:text-emerald-600 transition-colors">Entered the wrong email?</button>
-              </motion.form>
-            ) : (
-              <motion.form key="auth-screen" initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 10 }}
-                onSubmit={isRegistering ? handleRequestOTP : handleLogin} className="space-y-4">
-                {isRegistering && (
-                  <div className="relative">
-                    <UserIcon className="absolute left-4 top-4 w-5 h-5 text-slate-300" />
-                    <input required type="text" placeholder="Full Name" className="w-full pl-12 pr-4 py-4 bg-slate-50 rounded-2xl outline-none focus:ring-2 focus:ring-slate-200" 
-                      onChange={(e) => setAuthData({...authData, name: e.target.value})} />
-                  </div>
-                )}
-                <div className="relative">
-                  <Mail className="absolute left-4 top-4 w-5 h-5 text-slate-300" />
-                  <input required type="email" placeholder="Email Address" className="w-full pl-12 pr-4 py-4 bg-slate-50 rounded-2xl outline-none focus:ring-2 focus:ring-slate-200" 
-                    onChange={(e) => setAuthData({...authData, email: e.target.value})} />
-                </div>
-                <div className="relative">
-                  <Lock className="absolute left-4 top-4 w-5 h-5 text-slate-300" />
-                  <input required type="password" placeholder="Password" className="w-full pl-12 pr-4 py-4 bg-slate-50 rounded-2xl outline-none focus:ring-2 focus:ring-slate-200" 
-                    onChange={(e) => setAuthData({...authData, password: e.target.value})} />
-                </div>
-                <button type="submit" className="w-full py-4 bg-slate-900 text-white rounded-2xl font-bold hover:bg-emerald-600 transition-all shadow-lg">
-                  {authLoading ? <Loader2 className="animate-spin mx-auto" /> : (isRegistering ? "Send Verification Code" : "Sign In")}
-                </button>
-              </motion.form>
+          <form onSubmit={isRegistering ? handleRegister : handleLogin} className="space-y-4">
+            {isRegistering && (
+              <div className="relative">
+                <UserIcon className="absolute left-4 top-4 w-5 h-5 text-slate-300" />
+                <input required type="text" placeholder="Full Name" className="w-full pl-12 pr-4 py-4 bg-slate-50 rounded-2xl outline-none focus:ring-2 focus:ring-slate-200" 
+                  onChange={(e) => setAuthData({...authData, name: e.target.value})} />
+              </div>
             )}
-          </AnimatePresence>
-
-          {step === 'auth' && (
-            <button onClick={() => { setIsRegistering(!isRegistering); setAuthData({name:'', email:'', password:''}); }} className="w-full mt-4 text-sm text-emerald-600 font-bold underline">
-              {isRegistering ? "Already have an account? Login" : "New clinician? Create Account"}
+            <div className="relative">
+              <Mail className="absolute left-4 top-4 w-5 h-5 text-slate-300" />
+              <input required type="email" placeholder="Email Address" className="w-full pl-12 pr-4 py-4 bg-slate-50 rounded-2xl outline-none focus:ring-2 focus:ring-slate-200" 
+                onChange={(e) => setAuthData({...authData, email: e.target.value})} />
+            </div>
+            <div className="relative">
+              <Lock className="absolute left-4 top-4 w-5 h-5 text-slate-300" />
+              <input required type="password" placeholder="Password" className="w-full pl-12 pr-4 py-4 bg-slate-50 rounded-2xl outline-none focus:ring-2 focus:ring-slate-200" 
+                onChange={(e) => setAuthData({...authData, password: e.target.value})} />
+            </div>
+            <button type="submit" className="w-full py-4 bg-slate-900 text-white rounded-2xl font-bold hover:bg-emerald-600 transition-all shadow-lg">
+              {authLoading ? <Loader2 className="animate-spin mx-auto" /> : (isRegistering ? "Create Account" : "Sign In")}
             </button>
-          )}
+          </form>
+
+          <button onClick={() => { setIsRegistering(!isRegistering); setAuthData({name:'', email:'', password:''}); }} className="w-full mt-4 text-sm text-emerald-600 font-bold underline">
+            {isRegistering ? "Already have an account? Login" : "New clinician? Create Account"}
+          </button>
         </motion.div>
       </div>
     );
   }
 
+  // --- MAIN APP REMAINS THE SAME ---
   return (
     <div className="min-h-screen bg-slate-50 flex overflow-hidden font-sans">
-      {/* SIDEBAR HISTORY */}
       <motion.aside animate={{ width: showHistory ? "320px" : "80px" }} className="h-screen bg-white border-r border-slate-200 flex flex-col shadow-xl z-20 relative">
         <div className="p-6 flex items-center justify-between">
           {showHistory && <h3 className="font-black text-slate-800 text-xs tracking-widest">RECORDS</h3>}
