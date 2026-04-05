@@ -1,207 +1,170 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { Search, MapPin, Navigation, Loader2, AlertCircle } from 'lucide-react';
+import { Search, MapPin, Navigation, Loader2, AlertCircle, RefreshCw, PlusSquare } from 'lucide-react';
 
-// Marker Icons
-const userIcon = new L.Icon({
-    iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png',
-    iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34],
-    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
-    shadowSize: [41, 41]
+// Fix for default Leaflet icons in React
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
 
+// Custom Medical Icon
 const hospitalIcon = new L.Icon({
     iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
     iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34],
-    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
     shadowSize: [41, 41]
 });
 
-const getDist = (lat1, lon1, lat2, lon2) => {
-    const R = 6371;
-    const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLon = (lon2 - lon1) * Math.PI / 180;
-    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-              Math.sin(dLon / 2) * Math.sin(dLon / 2);
-    return (R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))).toFixed(2);
+const MapController = ({ center }) => {
+    const map = useMap();
+    useEffect(() => { if (center) map.flyTo(center, 13); }, [center, map]);
+    return null;
 };
 
-function MapController({ center }) {
-    const map = useMap();
-    useEffect(() => { if (center) map.setView(center, 13); }, [center, map]);
-    return null;
-}
-
 const HospitalMap = () => {
-    const [userPos, setUserPos] = useState([28.6139, 77.2090]); // Default Delhi
+    const [userPos, setUserPos] = useState([28.6139, 77.2090]); 
     const [hospitals, setHospitals] = useState([]);
     const [selectedHospital, setSelectedHospital] = useState(null);
     const [searchQuery, setSearchQuery] = useState("");
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
 
-    // Get User Location on Mount
+    // 1. Get Location with High Accuracy
     useEffect(() => {
         if ("geolocation" in navigator) {
             navigator.geolocation.getCurrentPosition(
                 (pos) => setUserPos([pos.coords.latitude, pos.coords.longitude]),
-                (err) => {
-                    console.warn("Location denied. Using default.");
-                    setError("Location access denied. Showing default area.");
-                }
+                () => setError("Using default location (Delhi). Search for your area below.")
             );
         }
     }, []);
 
-    const findHospitals = async (lat, lng) => {
+    // 2. The "Never-Fail" Fetch Function
+    const findHospitals = useCallback(async (lat, lng) => {
         setLoading(true);
         setError(null);
-        // Expanded query to include clinics and doctors for rural support
-        const query = `
-            [out:json][timeout:25];
-            (
-              node["amenity"~"hospital|clinic|doctors"](around:20000,${lat},${lng});
-              way["amenity"~"hospital|clinic|doctors"](around:20000,${lat},${lng});
-            );
-            out center;`;
+
+        // We use multiple Overpass servers to avoid "Busy" errors
+        const servers = [
+            'https://overpass-api.de/api/interpreter',
+            'https://overpass.kumi.systems/api/interpreter',
+            'https://lz4.overpass-api.de/api/interpreter'
+        ];
         
-        try {
-            const res = await fetch(`https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`);
-            if (!res.ok) throw new Error("API Limit Reached");
-            
-            const data = await res.json();
-            const list = data.elements.map(h => ({
-                name: h.tags["name:en"] || h.tags.name || "Medical Center",
-                lat: h.lat || h.center.lat,
-                lng: h.lon || h.center.lon,
-                type: h.tags.amenity,
-                dist: getDist(lat, lng, h.lat || h.center.lat, h.lon || h.center.lon)
-            })).sort((a, b) => a.dist - b.dist);
+        const query = `[out:json][timeout:15];(node["amenity"~"hospital|clinic|doctors|pharmacy"](around:20000,${lat},${lng});way["amenity"~"hospital|clinic|doctors|pharmacy"](around:20000,${lat},${lng}););out center;`;
 
-            setHospitals(list);
-            if(list.length === 0) setError("No medical facilities found within 20km.");
-            if(list.length > 0) setSelectedHospital(list[0]);
-        } catch (e) { 
-            setError("Map service busy. Please try again.");
-            console.error(e); 
-        } finally { 
-            setLoading(false); 
+        let success = false;
+        for (const server of servers) {
+            if (success) break;
+            try {
+                const res = await fetch(`${server}?data=${encodeURIComponent(query)}`);
+                if (!res.ok) continue; 
+                
+                const data = await res.json();
+                const list = data.elements.map(h => ({
+                    name: h.tags.name || h.tags["name:en"] || "Rural Health Center",
+                    lat: h.lat || h.center.lat,
+                    lng: h.lon || h.center.lon,
+                    type: (h.tags.amenity || "Medical").toUpperCase(),
+                    dist: (L.latLng(lat, lng).distanceTo(L.latLng(h.lat || h.center.lat, h.lon || h.center.lon)) / 1000).toFixed(1)
+                })).sort((a, b) => a.dist - b.dist);
+
+                setHospitals(list.slice(0, 10));
+                if (list.length > 0) setSelectedHospital(list[0]);
+                success = true;
+            } catch (e) {
+                console.warn(`Server ${server} failed, trying next...`);
+            }
         }
-    };
 
-    useEffect(() => { findHospitals(userPos[0], userPos[1]); }, [userPos]);
+        if (!success) setError("All map servers are busy. Please retry in a moment.");
+        setLoading(false);
+    }, []);
 
+    useEffect(() => { findHospitals(userPos[0], userPos[1]); }, [userPos, findHospitals]);
+
+    // 3. Search Logic
     const handleSearch = async (e) => {
         e.preventDefault();
         if (!searchQuery) return;
         setLoading(true);
         try {
-            const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${searchQuery}`);
+            const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}`);
             const data = await res.json();
             if (data[0]) {
                 setUserPos([parseFloat(data[0].lat), parseFloat(data[0].lon)]);
-                setSearchQuery(""); // Clear search after finding
-            } else {
-                setError("Location not found.");
-            }
-        } catch (err) {
-            setError("Search failed.");
-        } finally {
-            setLoading(false);
-        }
+                setSearchQuery("");
+            } else { setError("Location not found."); }
+        } catch (err) { setError("Search service busy."); }
+        setLoading(false);
     };
 
     return (
-        <div className="space-y-4 font-sans">
-            {/* Search Input */}
+        <div className="flex flex-col gap-4 w-full h-full">
+            {/* Minimal Search Bar */}
             <form onSubmit={handleSearch} className="relative">
                 <input 
-                    className="w-full p-4 pl-12 bg-white border-2 border-slate-100 rounded-2xl outline-none focus:border-blue-400 shadow-sm transition-all"
-                    placeholder="Enter city or area name..." 
+                    className="w-full p-3 pl-10 bg-slate-100 rounded-xl border-none focus:ring-2 focus:ring-emerald-500 text-sm"
+                    placeholder="Search village or town..." 
                     value={searchQuery} 
                     onChange={(e) => setSearchQuery(e.target.value)}
                 />
-                <Search className="absolute left-4 top-4 text-slate-400" size={20} />
-                {loading && <Loader2 className="absolute right-4 top-4 animate-spin text-blue-500" size={20} />}
+                <Search className="absolute left-3 top-3 text-slate-400" size={16} />
+                {loading && <Loader2 className="absolute right-3 top-3 animate-spin text-emerald-500" size={16} />}
             </form>
 
             {/* Map Container */}
-            <div className="h-[400px] w-full rounded-[2.5rem] overflow-hidden border-4 border-white shadow-xl relative">
+            <div className="flex-1 rounded-3xl overflow-hidden border border-slate-200 relative min-h-[300px]">
                 {error && (
-                    <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[1000] bg-red-50 text-red-600 px-4 py-2 rounded-full text-xs font-bold flex items-center gap-2 border border-red-200 shadow-lg">
-                        <AlertCircle size={14} /> {error}
+                    <div className="absolute top-2 left-1/2 -translate-x-1/2 z-[1000] bg-white border-2 border-red-100 p-2 rounded-xl shadow-lg flex items-center gap-2">
+                        <span className="text-[10px] font-bold text-red-500 uppercase">{error}</span>
+                        <button onClick={() => findHospitals(userPos[0], userPos[1])} className="p-1 bg-red-500 text-white rounded-lg">
+                            <RefreshCw size={12} />
+                        </button>
                     </div>
                 )}
                 
-                <MapContainer center={userPos} zoom={13} style={{ height: '100%', width: '100%' }}>
-                    <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                <MapContainer center={userPos} zoom={13} style={{ height: '100%', width: '100%' }} zoomControl={false}>
+                    <TileLayer 
+                        url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+                        attribution='&copy; OpenStreetMap contributors'
+                    />
                     <MapController center={userPos} />
-                    
-                    <Marker position={userPos} icon={userIcon}><Popup>Your Search Location</Popup></Marker>
+                    <Marker position={userPos} />
                     
                     {hospitals.map((h, i) => (
-                        <Marker 
-                            key={i} 
-                            position={[h.lat, h.lng]} 
-                            icon={hospitalIcon}
-                            eventHandlers={{ click: () => setSelectedHospital(h) }}
-                        >
+                        <Marker key={i} position={[h.lat, h.lng]} icon={hospitalIcon}>
                             <Popup>
-                                <div className="p-1 text-center">
-                                    <p className="font-bold text-slate-800">{h.name}</p>
-                                    <p className="text-blue-500 font-bold">{h.dist} KM</p>
-                                    <span className="text-[10px] uppercase bg-slate-100 px-2 py-1 rounded-md">{h.type}</span>
+                                <div className="text-center font-sans">
+                                    <p className="font-bold">{h.name}</p>
+                                    <p className="text-emerald-600 font-bold">{h.dist} KM</p>
                                 </div>
                             </Popup>
                         </Marker>
                     ))}
-
-                    {selectedHospital && (
-                        <Polyline 
-                            positions={[userPos, [selectedHospital.lat, selectedHospital.lng]]} 
-                            color="#3b82f6" 
-                            weight={4} 
-                            opacity={0.6}
-                            dashArray="10, 10"
-                        />
-                    )}
                 </MapContainer>
             </div>
 
-            {/* Quick Actions / Results */}
-            <div className="grid grid-cols-1 gap-3">
+            {/* Top 3 Result List */}
+            <div className="space-y-2">
                 {hospitals.slice(0, 3).map((h, i) => (
-                    <div 
-                        key={i} 
-                        onClick={() => setSelectedHospital(h)}
-                        className={`p-4 rounded-3xl flex justify-between items-center border-2 cursor-pointer transition-all hover:scale-[1.02] active:scale-95 ${selectedHospital?.name === h.name ? 'border-blue-400 bg-blue-50' : 'border-slate-50 bg-white'}`}
-                    >
-                        <div className="flex items-center gap-4">
-                            <div className={`p-3 rounded-2xl ${selectedHospital?.name === h.name ? 'bg-blue-500 text-white shadow-lg shadow-blue-200' : 'bg-slate-100 text-slate-400'}`}>
-                                <Navigation size={18} />
-                            </div>
+                    <div key={i} className="flex justify-between items-center p-3 bg-white border border-slate-100 rounded-2xl shadow-sm hover:border-emerald-500 transition-all cursor-pointer" onClick={() => setSelectedHospital(h)}>
+                        <div className="flex items-center gap-3">
+                            <PlusSquare className="text-red-500" size={20} />
                             <div>
-                                <h4 className="font-bold text-slate-800 text-sm">{h.name}</h4>
-                                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
-                                    {h.type} • Tap to view route
-                                </p>
+                                <h4 className="text-xs font-bold text-slate-800 truncate w-32">{h.name}</h4>
+                                <p className="text-[9px] text-slate-400 uppercase tracking-tighter">{h.type}</p>
                             </div>
                         </div>
-                        <div className="text-right">
-                            <span className="block text-lg font-black text-slate-700 leading-none">{h.dist}</span>
-                            <span className="text-[10px] font-bold text-blue-500 uppercase">KM</span>
+                        <div className="bg-emerald-50 px-2 py-1 rounded-lg">
+                            <span className="text-[10px] font-black text-emerald-600">{h.dist} KM</span>
                         </div>
                     </div>
                 ))}
-                {hospitals.length === 0 && !loading && (
-                    <div className="text-center p-8 bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200">
-                        <MapPin className="mx-auto text-slate-300 mb-2" size={32} />
-                        <p className="text-slate-500 text-sm">Try searching for a different city or area.</p>
-                    </div>
-                )}
             </div>
         </div>
     );
