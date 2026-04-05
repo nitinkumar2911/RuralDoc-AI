@@ -3,7 +3,7 @@ import axios from 'axios';
 import { 
   Activity, ShieldCheck, Stethoscope, Mail, Lock, User as UserIcon, 
   LogOut, Loader2, Search, Plus, X, History, 
-  ChevronRight, Keyboard, MapPin
+  ChevronRight, Keyboard, MapPin, AlertCircle, Info
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -26,7 +26,9 @@ const App = () => {
   const [patientInfo, setPatientInfo] = useState({ age: '', duration: '1-2 Days' });
   const [selectedSymptoms, setSelectedSymptoms] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
-  const [prediction, setPrediction] = useState("");
+  
+  // Updated state to hold the full result object
+  const [diagnosisResult, setDiagnosisResult] = useState(null); 
   const [loading, setLoading] = useState(false);
 
   const [history, setHistory] = useState([]);
@@ -54,8 +56,6 @@ const App = () => {
   };
 
   // --- AUTH FLOW ---
-
-  // 1. Direct Registration (OTP Removed)
   const handleRegister = async (e) => {
     e.preventDefault();
     if (!authData.email.includes("@")) return alert("Please enter a valid email");
@@ -63,13 +63,12 @@ const App = () => {
     try {
       await axios.post(`${API_BASE_URL}/api/auth/register`, authData);
       alert("Registration successful! You can now log in.");
-      setIsRegistering(false); // Switch to Login view
+      setIsRegistering(false);
     } catch (err) {
       alert(err.response?.data?.message || "Registration failed.");
     } finally { setAuthLoading(false); }
   };
 
-  // 2. Login
   const handleLogin = async (e) => {
     e.preventDefault();
     setAuthLoading(true);
@@ -96,10 +95,11 @@ const App = () => {
 
   useEffect(() => { if (isLoggedIn) fetchHistory(); }, [isLoggedIn]);
 
+  // --- DIAGNOSIS LOGIC ---
   const handleDiagnose = async () => {
     if (!patientInfo.age || selectedSymptoms.length === 0) return alert("Please provide Age and Symptoms");
     setLoading(true);
-    setPrediction(""); 
+    setDiagnosisResult(null); 
     try {
       const user = JSON.parse(localStorage.getItem('user'));
       const res = await axios.post(`${API_BASE_URL}/api/ai/diagnose`, { 
@@ -110,7 +110,8 @@ const App = () => {
       }, { timeout: 45000 });
       
       if (res.data.prediction) {
-        setPrediction(res.data.prediction);
+        // Store the full object: { prediction, description, precautions }
+        setDiagnosisResult(res.data); 
         await fetchHistory();
       }
     } catch (err) { 
@@ -122,7 +123,7 @@ const App = () => {
   const handleLogout = () => {
     localStorage.clear();
     setIsLoggedIn(false);
-    setPrediction("");
+    setDiagnosisResult(null);
   };
 
   if (!isLoggedIn) {
@@ -170,9 +171,9 @@ const App = () => {
     );
   }
 
-  // --- MAIN APP REMAINS THE SAME ---
   return (
     <div className="min-h-screen bg-slate-50 flex overflow-hidden font-sans">
+      {/* SIDEBAR */}
       <motion.aside animate={{ width: showHistory ? "320px" : "80px" }} className="h-screen bg-white border-r border-slate-200 flex flex-col shadow-xl z-20 relative">
         <div className="p-6 flex items-center justify-between">
           {showHistory && <h3 className="font-black text-slate-800 text-xs tracking-widest">RECORDS</h3>}
@@ -193,14 +194,15 @@ const App = () => {
         </div>
       </motion.aside>
 
+      {/* MAIN CONTENT */}
       <main className="flex-1 h-screen overflow-y-auto p-6 lg:p-12">
-        <div className="max-w-5xl mx-auto pb-20">
+        <div className="max-w-6xl mx-auto pb-20">
           <nav className="flex justify-between items-center mb-10">
             <div className="flex items-center gap-3">
               <div className="bg-emerald-500 p-2 rounded-xl shadow-emerald-200 shadow-lg">
                 <Activity className="text-white w-6 h-6" />
               </div>
-              <span className="font-black text-2xl tracking-tighter text-slate-800">RURALDOC AI</span>
+              <span className="font-black text-2xl tracking-tighter text-slate-800 uppercase">RuralDoc AI</span>
             </div>
             <button onClick={handleLogout} className="p-3 rounded-2xl text-slate-400 hover:text-red-500 hover:bg-red-50 transition-all">
               <LogOut className="w-5 h-5" />
@@ -208,7 +210,8 @@ const App = () => {
           </nav>
 
           <div className="grid lg:grid-cols-12 gap-8">
-            <div className="lg:col-span-8 space-y-6">
+            <div className="lg:col-span-7 space-y-6">
+              {/* PATIENT INFO */}
               <div className="bg-white p-8 rounded-[2.5rem] shadow-sm grid md:grid-cols-2 gap-6 border border-slate-100">
                 <div>
                   <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block tracking-widest">Patient Age</label>
@@ -224,6 +227,7 @@ const App = () => {
                 </div>
               </div>
 
+              {/* SYMPTOM SEARCH */}
               <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100">
                 <label className="text-[10px] font-black text-slate-400 uppercase mb-4 block tracking-widest">Identify Symptoms</label>
                 <div className="relative mb-6">
@@ -245,6 +249,7 @@ const App = () => {
                   </AnimatePresence>
                 </div>
 
+                {/* SELECTED SYMPTOMS */}
                 <div className="flex flex-wrap gap-2 p-6 bg-slate-50 rounded-[2rem] border-2 border-dashed border-slate-200 min-h-[120px]">
                   {selectedSymptoms.length === 0 ? (
                     <div className="flex flex-col items-center justify-center w-full text-slate-300 py-4 opacity-40">
@@ -265,6 +270,7 @@ const App = () => {
                 </button>
               </div>
 
+              {/* MAP SECTION */}
               <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100">
                 <div className="flex items-center gap-3 mb-6">
                    <div className="bg-emerald-100 p-2 rounded-xl">
@@ -273,26 +279,69 @@ const App = () => {
                    <h3 className="font-black text-slate-800 uppercase tracking-widest text-xs">Nearby Healthcare Facilities</h3>
                 </div>
                 <div className="rounded-[1.5rem] overflow-hidden border border-slate-100 h-[300px]">
-                  <HospitalMap key={prediction} />
+                  <HospitalMap key={diagnosisResult?.prediction || 'map'} />
                 </div>
               </div>
             </div>
 
-            <div className="lg:col-span-4 bg-slate-900 rounded-[3.5rem] p-10 text-white shadow-2xl text-center flex flex-col justify-center min-h-[500px] sticky top-12 border-4 border-slate-800">
+            {/* RESULTS SIDEBAR (MODIFIED) */}
+            <div className="lg:col-span-5 bg-slate-900 rounded-[3.5rem] p-8 text-white shadow-2xl flex flex-col justify-start min-h-[600px] sticky top-12 border-4 border-slate-800 overflow-y-auto scrollbar-hide">
               <AnimatePresence mode="wait">
-                {prediction ? (
-                  <motion.div key="result" initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}>
-                    <div className="bg-emerald-500/10 w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-8 border border-emerald-500/20">
-                      <ShieldCheck className="w-12 h-12 text-emerald-500" />
+                {diagnosisResult ? (
+                  <motion.div key="result" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="w-full">
+                    <div className="bg-emerald-500/20 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 border border-emerald-500/30">
+                      <ShieldCheck className="w-8 h-8 text-emerald-500" />
                     </div>
-                    <p className="text-emerald-500 uppercase text-[10px] font-black mb-2 tracking-[0.3em]">AI Diagnosis Result</p>
-                    <h3 className="text-4xl font-black tracking-tight leading-tight capitalize mb-6">{prediction}</h3>
-                    <p className="text-slate-400 text-xs leading-relaxed px-4">This is an AI-generated suggestion based on reported symptoms. Please correlate with clinical findings.</p>
+                    
+                    <div className="text-center border-b border-white/10 pb-6 mb-6">
+                        <p className="text-emerald-500 uppercase text-[10px] font-black mb-1 tracking-[0.3em]">Probable Diagnosis</p>
+                        <h3 className="text-4xl font-black tracking-tight leading-tight capitalize text-white">{diagnosisResult.prediction}</h3>
+                    </div>
+
+                    {/* DESCRIPTION */}
+                    <div className="space-y-3 mb-8">
+                        <div className="flex items-center gap-2 text-blue-400">
+                            <Info size={16} />
+                            <h4 className="text-[10px] font-black uppercase tracking-widest">Medical Description</h4>
+                        </div>
+                        <div className="bg-white/5 rounded-2xl p-4 border border-white/10">
+                            <p className="text-slate-300 text-sm leading-relaxed">
+                                {diagnosisResult.description}
+                            </p>
+                        </div>
+                    </div>
+
+                    {/* PRECAUTIONS */}
+                    <div className="space-y-4">
+                        <div className="flex items-center gap-2 text-emerald-400">
+                            <AlertCircle size={16} />
+                            <h4 className="text-[10px] font-black uppercase tracking-widest">Recommended Actions</h4>
+                        </div>
+                        <div className="grid gap-2">
+                            {diagnosisResult.precautions.map((p, i) => (
+                                <motion.div 
+                                    initial={{ opacity: 0, y: 5 }} 
+                                    animate={{ opacity: 1, y: 0 }} 
+                                    transition={{ delay: i * 0.1 }}
+                                    key={i} 
+                                    className="flex items-center gap-3 bg-white/5 p-4 rounded-2xl border border-white/5 group hover:bg-white/10 transition-colors"
+                                >
+                                    <div className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                                    <span className="text-slate-200 text-sm font-medium">{p}</span>
+                                </motion.div>
+                            ))}
+                        </div>
+                    </div>
+
+                    <p className="text-slate-500 text-[10px] text-center italic mt-10 px-4">
+                        Disclaimer: This AI is a decision-support tool for rural healthcare. Always confirm with physical examinations.
+                    </p>
                   </motion.div>
                 ) : (
-                  <motion.div key="waiting" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="opacity-20 flex flex-col items-center">
-                    <Stethoscope className="w-16 h-16 mb-4" />
-                    <p className="font-black uppercase tracking-[0.2em] text-xs">Waiting for Analysis</p>
+                  <motion.div key="waiting" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex-1 flex flex-col items-center justify-center opacity-20 py-20">
+                    <Stethoscope className="w-20 h-20 mb-6" />
+                    <p className="font-black uppercase tracking-[0.3em] text-sm">Awaiting Input</p>
+                    <p className="text-[10px] mt-2 text-center max-w-[200px]">Select symptoms and click "Run AI Diagnosis" to see results.</p>
                   </motion.div>
                 )}
               </AnimatePresence>
