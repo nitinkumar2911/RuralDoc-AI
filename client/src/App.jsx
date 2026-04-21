@@ -174,7 +174,7 @@ const App = () => {
   return (
     <div className="min-h-screen bg-slate-50 flex overflow-hidden font-sans">
       {/* SIDEBAR */}
-      <motion.aside animate={{ width: showHistory ? "320px" : "80px" }} className="h-screen bg-white border-r border-slate-200 flex flex-col shadow-xl z-20 relative">
+      <motion.aside animate={{ width: showHistory ? "320px" : "81px" }} className="h-screen bg-white border-r border-slate-200 flex flex-col shadow-xl z-20 relative">
         <div className="p-6 flex items-center justify-between">
           {showHistory && <h3 className="font-black text-slate-800 text-xs tracking-widest">RECORDS</h3>}
           <button onClick={() => setShowHistory(!showHistory)} className="p-3 rounded-2xl bg-slate-50 text-emerald-600 hover:bg-emerald-50 transition-colors mx-auto">
