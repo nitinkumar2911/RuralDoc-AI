@@ -1,94 +1,86 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { MapContainer, TileLayer, Marker, useMap } from 'react-leaflet';
+import React, { useState, useEffect, useCallback } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { Navigation, MapPin, Activity, Compass, ArrowUpRight, Clock } from 'lucide-react';
+import { MapPin, Activity, Navigation, Phone, Info } from 'lucide-react';
 
-// --- MARKER SETUP ---
-const userIcon = new L.Icon({
-    iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png',
-    iconSize: [25, 41], iconAnchor: [12, 41]
+// --- ICONS ---
+const createIcon = (color) => new L.Icon({
+    iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-${color}.png`,
+    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+    iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
 });
 
-const hospitalIcon = new L.Icon({
-    iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
-    iconSize: [25, 41], iconAnchor: [12, 41]
-});
+const userIcon = createIcon('blue');
+const hospitalIcon = createIcon('red');
 
-// --- COMPONENT TO DRAW THE ROUTE LINE ---
-const RouteLine = ({ path }) => {
+// --- HELPER: Zoom map to show both points ---
+const AutoZoom = ({ points }) => {
     const map = useMap();
-    const lineRef = useRef(null);
-
     useEffect(() => {
-        if (!map || !path) return;
-        if (lineRef.current) map.removeLayer(lineRef.current);
-
-        lineRef.current = L.polyline(path, {
-            color: '#3b82f6',
-            weight: 6,
-            opacity: 0.8,
-            lineJoin: 'round'
-        }).addTo(map);
-
-        map.fitBounds(lineRef.current.getBounds(), { padding: [40, 40] });
-
-        return () => { if (lineRef.current) map.removeLayer(lineRef.current); };
-    }, [map, path]);
-
+        if (points && points.length > 0) {
+            const bounds = L.latLngBounds(points);
+            map.fitBounds(bounds, { padding: [50, 50] });
+        }
+    }, [points, map]);
     return null;
 };
 
 const HospitalMap = () => {
-    const [userPos, setUserPos] = useState([27.1767, 78.0081]); // Agra
+    const [userPos, setUserPos] = useState([27.1767, 78.0081]); // Default Agra
     const [hospitals, setHospitals] = useState([]);
-    const [selectedHospital, setSelectedHospital] = useState(null);
-    const [routeInfo, setRouteInfo] = useState({ distance: 0, duration: 0, nextStep: "" });
-    const [routePath, setRoutePath] = useState(null);
+    const [selectedHosp, setSelectedHosp] = useState(null);
+    const [routePath, setRoutePath] = useState([]);
     const [loading, setLoading] = useState(true);
 
-    const MAPTILER_KEY = "PgnxR4LxF3YjTC0jAwtF";
     const GRAPHHOPPER_KEY = "94238c37-b99e-4952-b1dc-1046b2193b3c";
 
-    // 1. Fetch Hospitals (Overpass API)
-    const findHospitals = useCallback(async (lat, lng) => {
+    // 1. Calculate Straight Distance (Instant Feedback)
+    const getStraightDistance = (p1, p2) => {
+        const d = L.latLng(p1).distanceTo(L.latLng(p2));
+        return (d / 1000).toFixed(1); // Return in KM
+    };
+
+    // 2. Search Hospitals & Find Nearest
+    const searchHospitals = useCallback(async (lat, lng) => {
         setLoading(true);
-        const query = `[out:json];(node["amenity"~"hospital|clinic"](around:8000,${lat},${lng}););out center;`;
+        const query = `[out:json];node["amenity"~"hospital|clinic"](around:5000,${lat},${lng});out;`;
         try {
             const res = await fetch(`https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`);
             const data = await res.json();
-            const list = data.elements.map(h => ({
-                name: h.tags.name || "Medical Center",
-                lat: h.lat || h.center.lat,
-                lng: h.lon || h.center.lon,
-            }));
-            setHospitals(list);
-            if (list.length > 0) handleSelect(list[0], [lat, lng]);
-        } catch (e) { console.error("Data fetch error"); }
+            
+            const results = data.elements.map(h => ({
+                id: h.id,
+                name: h.tags.name || "Unnamed Medical Center",
+                phone: h.tags.phone || h.tags['contact:phone'] || "No contact info",
+                lat: h.lat,
+                lng: h.lon,
+                dist: getStraightDistance([lat, lng], [h.lat, h.lon])
+            })).sort((a, b) => a.dist - b.dist);
+
+            setHospitals(results);
+            if (results.length > 0) handleSelect(results[0], [lat, lng]);
+        } catch (e) {
+            console.error("Failed to fetch hospitals");
+        }
         setLoading(false);
     }, []);
 
-    // 2. Fetch Professional Directions (GraphHopper)
-    const getDirections = async (start, end) => {
-        const url = `https://graphhopper.com/api/1/route?point=${start[0]},${start[1]}&point=${end[0]},${end[1]}&profile=car&locale=en&points_encoded=false&key=${GRAPHHOPPER_KEY}`;
+    // 3. Handle Hospital Selection & Road Routing
+    const handleSelect = async (h, currentPos = userPos) => {
+        setSelectedHosp(h);
+        const url = `https://graphhopper.com/api/1/route?point=${currentPos[0]},${currentPos[1]}&point=${h.lat},${h.lng}&profile=car&points_encoded=false&key=${GRAPHHOPPER_KEY}`;
+        
         try {
             const res = await fetch(url);
             const data = await res.json();
             if (data.paths) {
-                const path = data.paths[0];
-                setRouteInfo({
-                    distance: (path.distance / 1000).toFixed(2),
-                    duration: Math.round(path.time / 60000),
-                    nextStep: path.instructions[0].text
-                });
-                setRoutePath(path.points.coordinates.map(c => [c[1], c[0]]));
+                const points = data.paths[0].points.coordinates.map(c => [c[1], c[0]]);
+                setRoutePath(points);
             }
-        } catch (e) { console.error("Routing error"); }
-    };
-
-    const handleSelect = (h, currentPos = userPos) => {
-        setSelectedHospital(h);
-        getDirections(currentPos, [h.lat, h.lng]);
+        } catch (e) {
+            setRoutePath([[currentPos[0], currentPos[1]], [h.lat, h.lng]]); // Fallback to straight line
+        }
     };
 
     useEffect(() => {
@@ -96,91 +88,92 @@ const HospitalMap = () => {
             (pos) => {
                 const p = [pos.coords.latitude, pos.coords.longitude];
                 setUserPos(p);
-                findHospitals(p[0], p[1]);
+                searchHospitals(p[0], p[1]);
             },
-            () => findHospitals(userPos[0], userPos[1]),
+            () => searchHospitals(userPos[0], userPos[1]),
             { enableHighAccuracy: true }
         );
     }, []);
 
     return (
-        <div className="flex flex-col w-full max-w-5xl mx-auto h-[95vh] md:h-auto gap-3 p-2 md:p-6 bg-slate-50 rounded-[2rem] md:rounded-[3rem] shadow-2xl border border-slate-200 overflow-hidden">
+        <div className="flex flex-col md:flex-row h-[90vh] w-full max-w-6xl mx-auto bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-200">
             
-            {/* Responsive Header */}
-            <div className="flex items-center justify-between px-3 py-2">
-                <div className="flex items-center gap-2 md:gap-3">
-                    <div className="bg-red-500 p-2 rounded-xl md:rounded-2xl shadow-lg shadow-red-100">
-                        <Activity className="text-white w-4 h-4 md:w-5 md:h-5" />
+            {/* Sidebar: List of Nearest Hospitals */}
+            <div className="w-full md:w-80 bg-slate-50 border-r border-slate-200 flex flex-col">
+                <div className="p-6 bg-white border-b border-slate-100">
+                    <div className="flex items-center gap-2 text-red-600 mb-1">
+                        <Activity size={20} className="animate-pulse" />
+                        <h2 className="font-black uppercase tracking-tight">Nearby Help</h2>
                     </div>
-                    <div>
-                        <h1 className="text-sm md:text-lg font-black text-slate-800 tracking-tight">Agra HealthNav</h1>
-                        <p className="hidden md:block text-[10px] text-slate-400 font-bold uppercase">Emergency Response System</p>
-                    </div>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase">Emergency Quick-Access</p>
                 </div>
-                {loading && <div className="text-[10px] font-bold text-blue-500 animate-pulse uppercase">Updating...</div>}
+
+                <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                    {hospitals.map(h => (
+                        <div 
+                            key={h.id}
+                            onClick={() => handleSelect(h)}
+                            className={`p-4 rounded-2xl cursor-pointer transition-all border-2 ${selectedHosp?.id === h.id ? 'border-blue-500 bg-blue-50 shadow-md' : 'border-transparent bg-white hover:border-slate-200'}`}
+                        >
+                            <h3 className="font-bold text-slate-800 text-sm leading-tight mb-1">{h.name}</h3>
+                            <div className="flex justify-between items-center">
+                                <span className="text-[10px] font-black text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">{h.dist} KM</span>
+                                <Navigation size={14} className={selectedHosp?.id === h.id ? 'text-blue-500' : 'text-slate-300'} />
+                            </div>
+                        </div>
+                    ))}
+                </div>
             </div>
 
-            {/* MAP CONTAINER - Height adjusts for Mobile (300px) vs Laptop (500px) */}
-            <div className="relative w-full h-[350px] md:h-[500px] rounded-[1.5rem] md:rounded-[2.5rem] overflow-hidden border-4 border-white shadow-inner bg-slate-200">
+            {/* Main Map Area */}
+            <div className="flex-1 relative">
                 <MapContainer center={userPos} zoom={14} style={{ height: '100%', width: '100%' }} zoomControl={false}>
-                    <TileLayer url={`https://api.maptiler.com/maps/streets-v2/{z}/{x}/{y}.png?key=${MAPTILER_KEY}`} />
-                    <Marker position={userPos} icon={userIcon} />
-                    {hospitals.map((h, i) => (
+                    <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                    
+                    <Marker position={userPos} icon={userIcon}>
+                        <Popup>You are here</Popup>
+                    </Marker>
+
+                    {hospitals.map(h => (
                         <Marker 
-                            key={i} 
+                            key={h.id} 
                             position={[h.lat, h.lng]} 
-                            icon={hospitalIcon} 
-                            eventHandlers={{ click: () => handleSelect(h) }} 
+                            icon={hospitalIcon}
+                            eventHandlers={{ click: () => handleSelect(h) }}
                         />
                     ))}
-                    {routePath && <RouteLine path={routePath} />}
+
+                    {routePath.length > 0 && <Polyline positions={routePath} color="#3b82f6" weight={5} opacity={0.7} />}
+                    <AutoZoom points={selectedHosp ? [userPos, [selectedHosp.lat, selectedHosp.lng]] : [userPos]} />
                 </MapContainer>
-            </div>
 
-            {/* INFO CARD - Responsive Grid */}
-            <div className="bg-slate-900 rounded-[1.5rem] md:rounded-[2.5rem] p-4 md:p-8 text-white shadow-2xl flex-shrink-0">
-                {selectedHospital ? (
-                    <div className="flex flex-col md:flex-row justify-between gap-4 md:gap-8">
-                        <div className="flex-1 border-b md:border-b-0 md:border-r border-white/10 pb-4 md:pb-0 md:pr-8">
-                            <h2 className="text-lg md:text-2xl font-bold text-blue-400 truncate mb-1">
-                                {selectedHospital.name}
-                            </h2>
-                            <div className="flex items-center gap-2 text-slate-400 text-xs md:text-sm">
-                                <MapPin size={14} />
-                                <span className="font-medium">Direct Road Route Active</span>
-                            </div>
-                            
-                            <div className="mt-4 flex items-center gap-3 bg-white/5 p-3 rounded-2xl border border-white/5">
-                                <div className="bg-blue-500/20 p-2 rounded-lg">
-                                    <ArrowUpRight className="text-blue-400" size={18} />
+                {/* Bottom Floating Info Card */}
+                {selectedHosp && (
+                    <div className="absolute bottom-6 left-6 right-6 z-[1000] bg-slate-900 text-white p-6 rounded-[2rem] shadow-2xl animate-in slide-in-from-bottom-4 duration-500">
+                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                            <div>
+                                <div className="flex items-center gap-2 mb-1">
+                                    <span className="bg-emerald-500 w-2 h-2 rounded-full animate-ping" />
+                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Active Navigation</p>
                                 </div>
-                                <p className="text-xs md:text-sm font-medium text-slate-200 italic leading-snug">
-                                    {routeInfo.nextStep || "Calculating fastest path..."}
+                                <h2 className="text-xl font-bold truncate">{selectedHosp.name}</h2>
+                                <p className="text-slate-400 text-xs flex items-center gap-2 mt-1">
+                                    <Phone size={12} /> {selectedHosp.phone}
                                 </p>
+                            </div>
+                            <div className="flex gap-4 items-center bg-white/5 p-4 rounded-2xl border border-white/10">
+                                <div className="text-center pr-4 border-r border-white/10">
+                                    <p className="text-2xl font-black">{selectedHosp.dist}</p>
+                                    <p className="text-[8px] font-bold text-slate-500 uppercase">KM Away</p>
+                                </div>
+                                <button 
+                                    onClick={() => window.open(`https://www.google.com/maps/dir/?api=1&destination=${selectedHosp.lat},${selectedHosp.lng}`)}
+                                    className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-xl font-bold text-sm transition-colors flex items-center gap-2"
+                                >
+                                    GO <Navigation size={14} />
+                                </button>
                             </div>
                         </div>
-
-                        <div className="flex justify-around md:flex-col md:justify-center gap-4 md:w-32">
-                            <div className="text-center md:text-right">
-                                <p className="text-xl md:text-3xl font-black text-white leading-none">
-                                    {routeInfo.distance} <span className="text-blue-500 text-xs md:text-sm">KM</span>
-                                </p>
-                                <p className="text-[9px] md:text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">Distance</p>
-                            </div>
-                            <div className="text-center md:text-right">
-                                <p className="text-xl md:text-3xl font-black text-emerald-400 leading-none">
-                                    {routeInfo.duration} <span className="text-slate-400 text-xs md:text-sm">MIN</span>
-                                </p>
-                                <p className="text-[9px] md:text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">Travel Time</p>
-                            </div>
-                        </div>
-                    </div>
-                ) : (
-                    <div className="py-4 md:py-8 flex flex-col items-center gap-3 text-slate-500">
-                        <Navigation size={32} strokeWidth={1} className="animate-bounce" />
-                        <p className="text-[10px] md:text-xs font-bold uppercase tracking-widest text-center">
-                            Select a medical facility to start navigation
-                        </p>
                     </div>
                 )}
             </div>
